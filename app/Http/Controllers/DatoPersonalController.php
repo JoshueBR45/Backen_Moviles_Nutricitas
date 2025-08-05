@@ -12,72 +12,51 @@ class DatoPersonalController extends Controller
 {
     public function storeOrUpdate(Request $request)
     {
-        try {
-            // Validación menos estricta para la foto
-            $request->validate([
-                'apellidos' => 'nullable|string|max:255',
-                'alias' => 'nullable|string|max:255',
-                'cedula' => 'nullable|string|max:50',
-                'telefono' => 'nullable|string|max:50',
-                'fecha_nacimiento' => 'nullable|date',
-                'foto' => 'nullable|file|mimes:jpeg,png,jpg|max:5120',
-            ]);
+        // Validación de los datos
+        $request->validate([
+            'apellidos' => 'nullable|string|max:255',
+            'alias' => 'nullable|string|max:255',
+            'cedula' => 'nullable|string|max:50',
+            'telefono' => 'nullable|string|max:50',
+            'fecha_nacimiento' => 'nullable|date',
+            'foto' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048', // Validación de imagen
+        ]);
 
-            $user = Auth::user();
-            $datos = DatoPersonal::firstOrNew(['user_id' => $user->id]);
+        $user = Auth::user();
 
-            // Procesar la foto
-            if ($request->hasFile('foto')) {
-                try {
-                    // Eliminar foto anterior
-                    if ($datos->foto) {
-                        $oldPath = str_replace('storage/', 'public/', $datos->foto);
-                        if (Storage::exists($oldPath)) {
-                            Storage::delete($oldPath);
-                        }
-                    }
+        // Buscar los datos personales existentes o crear uno nuevo
+        $datos = DatoPersonal::firstOrNew(['user_id' => $user->id]);
 
-                    // Guardar nueva foto con nombre único
-                    $fileName = time() . '_' . uniqid() . '.' . 
-                            $request->file('foto')->getClientOriginalExtension();
-                    
-                    $path = $request->file('foto')->storeAs(
-                        'public/fotos/usuarios',
-                        $fileName
-                    );
+        // Llenamos los campos que pueden ser actualizados
+        $datos->fill($request->only([
+            'apellidos', 'alias', 'cedula', 'telefono', 'fecha_nacimiento'
+        ]));
 
-                    $datos->foto = str_replace('public/', 'storage/', $path);
-                } catch (\Exception $e) {
-                    \Log::error('Error procesando foto: ' . $e->getMessage());
-                    return response()->json([
-                        'message' => 'Error al procesar la imagen',
-                        'error' => $e->getMessage()
-                    ], 422);
-                }
+        // Manejar la foto
+        if ($request->hasFile('foto')) {
+            // Si el usuario ya tiene una foto, la eliminamos del storage
+            if ($datos->foto && Storage::exists('public/' . Str::replaceFirst('storage/', '', $datos->foto))) {
+                Storage::delete('public/' . Str::replaceFirst('storage/', '', $datos->foto));
             }
 
-            // Actualizar otros campos
-            $datos->fill($request->only([
-                'apellidos', 'alias', 'cedula', 'telefono', 'fecha_nacimiento'
-            ]));
-            
-            $datos->user_id = $user->id;
-            $datos->save();
+            // Almacenamos la nueva foto en el directorio `public/fotos`
+            $ruta = $request->file('foto')->store('public/fotos');
 
-            return response()->json([
-                'message' => 'Datos actualizados correctamente',
-                'datos_personales' => $datos,
-                'foto_url' => $datos->foto ? asset($datos->foto) : null
-            ]);
-
-        } catch (\Exception $e) {
-            \Log::error('Error en storeOrUpdate: ' . $e->getMessage());
-            return response()->json([
-                'message' => 'Error al actualizar los datos',
-                'error' => $e->getMessage()
-            ], 500);
+            // Guardamos la ruta de la foto en la base de datos, para acceder desde `storage`
+            $datos->foto = Str::replaceFirst('public/', 'storage/', $ruta);
         }
+
+        // Guardamos los datos personales
+        $datos->user_id = $user->id;
+        $datos->save();
+
+        // Retornamos una respuesta con los datos guardados
+        return response()->json([
+            'message' => 'Datos personales guardados correctamente',
+            'datos_personales' => $datos
+        ]);
     }
+
     // Mostrar los datos personales del usuario autenticado
     public function show()
     {
