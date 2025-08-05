@@ -12,51 +12,65 @@ class DatoPersonalController extends Controller
 {
     public function storeOrUpdate(Request $request)
     {
-        // Validación de los datos
-        $request->validate([
-            'apellidos' => 'nullable|string|max:255',
-            'alias' => 'nullable|string|max:255',
-            'cedula' => 'nullable|string|max:50',
-            'telefono' => 'nullable|string|max:50',
-            'fecha_nacimiento' => 'nullable|date',
-            'foto' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048', // Validación de imagen
-        ]);
+        try {
+            // 1. Validación
+            $validated = $request->validate([
+                'apellidos' => 'nullable|string|max:255',
+                'alias' => 'nullable|string|max:255',
+                'cedula' => 'nullable|string|max:50',
+                'telefono' => 'nullable|string|max:50',
+                'fecha_nacimiento' => 'nullable|date',
+                'foto' => 'nullable|image|mimes:jpeg,png,jpg|max:5120',
+            ]);
 
-        $user = Auth::user();
+            // 2. Obtener usuario y datos
+            $user = Auth::user();
+            $datos = DatoPersonal::firstOrNew(['user_id' => $user->id]);
 
-        // Buscar los datos personales existentes o crear uno nuevo
-        $datos = DatoPersonal::firstOrNew(['user_id' => $user->id]);
+            // 3. Procesar la foto
+            if ($request->hasFile('foto')) {
+                // 3.1 Eliminar foto anterior
+                if ($datos->foto) {
+                    $oldPath = str_replace('storage/', 'public/', $datos->foto);
+                    if (Storage::exists($oldPath)) {
+                        Storage::delete($oldPath);
+                    }
+                }
 
-        // Llenamos los campos que pueden ser actualizados
-        $datos->fill($request->only([
-            'apellidos', 'alias', 'cedula', 'telefono', 'fecha_nacimiento'
-        ]));
+                // 3.2 Guardar nueva foto
+                $fileName = time() . '_' . $user->id . '.' . 
+                        $request->file('foto')->getClientOriginalExtension();
+                
+                $path = $request->file('foto')->storeAs(
+                    'public/fotos/usuarios',
+                    $fileName
+                );
 
-        // Manejar la foto
-        if ($request->hasFile('foto')) {
-            // Si el usuario ya tiene una foto, la eliminamos del storage
-            if ($datos->foto && Storage::exists('public/' . Str::replaceFirst('storage/', '', $datos->foto))) {
-                Storage::delete('public/' . Str::replaceFirst('storage/', '', $datos->foto));
+                $datos->foto = str_replace('public/', 'storage/', $path);
             }
 
-            // Almacenamos la nueva foto en el directorio `public/fotos`
-            $ruta = $request->file('foto')->store('public/fotos');
+            // 4. Actualizar otros datos
+            $datos->fill($request->only([
+                'apellidos', 'alias', 'cedula', 'telefono', 'fecha_nacimiento'
+            ]));
+            $datos->user_id = $user->id;
+            $datos->save();
 
-            // Guardamos la ruta de la foto en la base de datos, para acceder desde `storage`
-            $datos->foto = Str::replaceFirst('public/', 'storage/', $ruta);
+            // 5. Retornar respuesta
+            return response()->json([
+                'message' => 'Datos actualizados correctamente',
+                'datos_personales' => $datos,
+                'foto_url' => $datos->foto ? asset($datos->foto) : null
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Error al actualizar datos: ' . $e->getMessage());
+            return response()->json([
+                'message' => 'Error al actualizar los datos',
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        // Guardamos los datos personales
-        $datos->user_id = $user->id;
-        $datos->save();
-
-        // Retornamos una respuesta con los datos guardados
-        return response()->json([
-            'message' => 'Datos personales guardados correctamente',
-            'datos_personales' => $datos
-        ]);
     }
-
     // Mostrar los datos personales del usuario autenticado
     public function show()
     {
