@@ -13,50 +13,57 @@ class DatoPersonalController extends Controller
     public function storeOrUpdate(Request $request)
     {
         try {
-            // 1. Validación
-            $validated = $request->validate([
+            // Validación menos estricta para la foto
+            $request->validate([
                 'apellidos' => 'nullable|string|max:255',
                 'alias' => 'nullable|string|max:255',
                 'cedula' => 'nullable|string|max:50',
                 'telefono' => 'nullable|string|max:50',
                 'fecha_nacimiento' => 'nullable|date',
-                'foto' => 'nullable|image|mimes:jpeg,png,jpg|max:5120',
+                'foto' => 'nullable|file|mimes:jpeg,png,jpg|max:5120',
             ]);
 
-            // 2. Obtener usuario y datos
             $user = Auth::user();
             $datos = DatoPersonal::firstOrNew(['user_id' => $user->id]);
 
-            // 3. Procesar la foto
+            // Procesar la foto
             if ($request->hasFile('foto')) {
-                // 3.1 Eliminar foto anterior
-                if ($datos->foto) {
-                    $oldPath = str_replace('storage/', 'public/', $datos->foto);
-                    if (Storage::exists($oldPath)) {
-                        Storage::delete($oldPath);
+                try {
+                    // Eliminar foto anterior
+                    if ($datos->foto) {
+                        $oldPath = str_replace('storage/', 'public/', $datos->foto);
+                        if (Storage::exists($oldPath)) {
+                            Storage::delete($oldPath);
+                        }
                     }
+
+                    // Guardar nueva foto con nombre único
+                    $fileName = time() . '_' . uniqid() . '.' . 
+                            $request->file('foto')->getClientOriginalExtension();
+                    
+                    $path = $request->file('foto')->storeAs(
+                        'public/fotos/usuarios',
+                        $fileName
+                    );
+
+                    $datos->foto = str_replace('public/', 'storage/', $path);
+                } catch (\Exception $e) {
+                    \Log::error('Error procesando foto: ' . $e->getMessage());
+                    return response()->json([
+                        'message' => 'Error al procesar la imagen',
+                        'error' => $e->getMessage()
+                    ], 422);
                 }
-
-                // 3.2 Guardar nueva foto
-                $fileName = time() . '_' . $user->id . '.' . 
-                        $request->file('foto')->getClientOriginalExtension();
-                
-                $path = $request->file('foto')->storeAs(
-                    'public/fotos/usuarios',
-                    $fileName
-                );
-
-                $datos->foto = str_replace('public/', 'storage/', $path);
             }
 
-            // 4. Actualizar otros datos
+            // Actualizar otros campos
             $datos->fill($request->only([
                 'apellidos', 'alias', 'cedula', 'telefono', 'fecha_nacimiento'
             ]));
+            
             $datos->user_id = $user->id;
             $datos->save();
 
-            // 5. Retornar respuesta
             return response()->json([
                 'message' => 'Datos actualizados correctamente',
                 'datos_personales' => $datos,
@@ -64,7 +71,7 @@ class DatoPersonalController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            \Log::error('Error al actualizar datos: ' . $e->getMessage());
+            \Log::error('Error en storeOrUpdate: ' . $e->getMessage());
             return response()->json([
                 'message' => 'Error al actualizar los datos',
                 'error' => $e->getMessage()
