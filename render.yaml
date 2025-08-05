@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: Backend_moviles_nutriCitas
+    env: php
+    plan: free
+    buildCommand: |
+      composer install --no-dev --optimize-autoloader
+      php artisan key:generate --force
+    startCommand: php artisan serve --host=0.0.0.0 --port=10000
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: false
+      # Aquí puedes añadir más variables, pero lo ideal es hacerlo desde el panel de Render
